@@ -1,0 +1,102 @@
+# =============================================================================
+# GoCanvas Production Verification App - Configuration
+# =============================================================================
+# Update this file with your actual form names, field mappings, and SQL queries.
+# Secrets (passwords, API keys) belong in .env, not here.
+# =============================================================================
+
+database:
+  # SQL query templates - update these to match your actual schema
+  # Use ? for parameterized date values (passed at runtime)
+  queries:
+    # Returns all positive production transactions for a given date
+    # Required columns: line_id, job_number, lot_code, item_number, transaction_date
+    positive_transactions: |
+      SELECT line_id, job_number, lot_code, item_number, transaction_date
+      FROM dbo.production_transactions
+      WHERE transaction_qty > 0
+        AND CAST(transaction_date AS DATE) = ?
+
+    # Returns lines that produced more than one distinct item on a given date
+    # Required columns: line_id, item_count
+    items_per_line_per_day: |
+      SELECT line_id, COUNT(DISTINCT item_number) as item_count
+      FROM dbo.production_transactions
+      WHERE transaction_qty > 0
+        AND CAST(transaction_date AS DATE) = ?
+      GROUP BY line_id
+      HAVING COUNT(DISTINCT item_number) > 1
+
+gocanvas:
+  base_url: "https://www.gocanvas.com/apiv2"
+
+  forms:
+    quality_check:
+      # Update with your actual GoCanvas form name or ID
+      name: "Quality Check Form"
+      # Webhook tag used to identify this form in Dispatch payloads
+      webhook_tag: "quality"
+      # Field names in the GoCanvas form that contain images
+      image_fields:
+        - "photo_1"
+        - "photo_2"
+      # Additional fields to extract from submissions
+      fields:
+        line: "production_line"
+        job: "job_number"
+        lot: "lot_code"
+
+    first_piece_approval:
+      name: "First Piece Approval"
+      webhook_tag: "first-piece"
+      # Fields used to match against SQL Server production transactions
+      match_fields:
+        line: "production_line"
+        job: "job_number"
+        lot: "lot_code"
+
+    line_clearance:
+      name: "Line Clearance Form"
+      webhook_tag: "line-clearance"
+      match_fields:
+        line: "production_line"
+
+claude_vision:
+  model: "claude-sonnet-4-20250514"
+  max_tokens: 1024
+  # Prompt sent to Claude Vision for quality image analysis
+  # {criteria} is replaced with form-specific criteria if configured
+  prompt_template: |
+    You are a quality inspection analyst. Analyze this quality inspection image
+    from a manufacturing production line.
+
+    Determine if the image shows:
+    1. A PASSING quality check (values within acceptable range, no visible defects)
+    2. A FAILING quality check or DISCREPANCY (out-of-range values, visible defects,
+       damage, contamination, or any quality concern)
+
+    Look for: measurement readings, gauge values, visual defects, color anomalies,
+    surface damage, contamination, or any indicator of a quality issue.
+
+    Respond with ONLY valid JSON in this exact format:
+    {"result": "PASS" or "FAIL", "confidence": 0.0 to 1.0, "details": "brief explanation of what you observed"}
+
+schedule:
+  # Time to run the daily compliance check (24-hour format)
+  daily_run_time: "06:00"
+  timezone: "America/New_York"
+  # How many days back to check (1 = yesterday only)
+  lookback_days: 1
+
+notifications:
+  # Email recipients for alerts and daily reports
+  recipients:
+    - "quality@example.com"
+  # Subject line template ({date} is replaced with the check date)
+  subject_template: "Quality Verification Report - {date}"
+  # Send immediate alerts for quality image failures?
+  immediate_quality_alerts: true
+
+webhook:
+  # Local SQLite database for storing webhook-received submissions
+  submission_db: "data/submissions.db"
