@@ -91,6 +91,42 @@ class GoCanvasClient:
         )
         return all_submissions
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout)),
+    )
+    def get_submission_by_id(self, submission_id: int) -> dict | None:
+        """Fetch a single submission by its GoCanvas submission ID.
+
+        Args:
+            submission_id: The GoCanvas submission ID from the webhook notification.
+
+        Returns:
+            Parsed submission dict, or None if not found.
+        """
+        params = {
+            **self._auth_params(),
+            "submission_id": submission_id,
+        }
+
+        logger.debug("Fetching GoCanvas submission by ID: %d", submission_id)
+        response = self.session.get(
+            f"{self.base_url}/submissions.xml",
+            params=params,
+            headers=self._auth_headers(),
+            timeout=30,
+        )
+        response.raise_for_status()
+
+        submissions, _ = self._parse_submissions_xml(response.text)
+        if submissions:
+            logger.info("Fetched submission %d: %d fields", submission_id, len(submissions[0]))
+            return submissions[0]
+
+        logger.warning("Submission %d not found in API response", submission_id)
+        return None
+
     def _parse_submissions_xml(self, xml_text: str) -> tuple[list[dict], int]:
         """Parse GoCanvas submissions XML response into list of dicts.
 

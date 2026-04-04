@@ -217,13 +217,19 @@ def main():
     # Mode 2/3: Start Flask server (with or without scheduler)
     app = create_app(settings)
 
-    # Wire up the quality checker for immediate webhook analysis
+    # Wire up clients for webhook processing
     try:
         _, gc_client, vision_client = create_clients(settings)
         quality_checker = QualityImagesCheck(gocanvas=gc_client, vision=vision_client, settings=settings)
         app.config["QUALITY_CHECKER"] = quality_checker
+        app.config["GOCANVAS_CLIENT"] = gc_client
+
+        # Set up email notifier for immediate alerts
+        smtp_config = get_smtp_config()
+        if smtp_config.get("user") and smtp_config.get("password"):
+            app.config["EMAIL_NOTIFIER"] = EmailNotifier(smtp_config)
     except Exception as e:
-        logger.warning("Could not initialize quality checker for webhook mode: %s", e)
+        logger.warning("Could not initialize webhook clients: %s", e)
 
     if not args.server_only:
         # Start APScheduler for daily checks
@@ -258,6 +264,59 @@ def main():
         port=flask_config["port"],
         debug=False,
     )
+
+
+def create_app_for_deploy():
+    """Factory function for gunicorn / Render deployment.
+
+    Usage: gunicorn "src.main:create_app_for_deploy()"
+    """
+    setup_logging()
+    settings = load_settings()
+
+    db_path = settings.get("webhook", {}).get("submission_db", "data/submissions.db")
+    init_submission_db(db_path)
+
+    app = create_app(settings)
+
+    # Wire up clients
+    try:
+        _, gc_client, vision_client = create_clients(settings)
+        quality_checker = QualityImagesCheck(gocanvas=gc_client, vision=vision_client, settings=settings)
+        app.config["QUALITY_CHECKER"] = quality_checker
+        app.config["GOCANVAS_CLIENT"] = gc_client
+
+        smtp_config = get_smtp_config()
+        if smtp_config.get("user") and smtp_config.get("password"):
+            app.config["EMAIL_NOTIFIER"] = EmailNotifier(smtp_config)
+    except Exception as e:
+        logger.warning("Could not initialize webhook clients: %s", e)
+
+    # Start scheduler
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        from apscheduler.triggers.cron import CronTrigger
+        import pytz
+
+        scheduler = BackgroundScheduler()
+        schedule_config = settings.get("schedule", {})
+        run_time = schedule_config.get("daily_run_time", "06:00")
+        tz = schedule_config.get("timezone", "America/New_York")
+        hour, minute = run_time.split(":")
+
+        scheduler.add_job(
+            run_daily_check,
+            trigger=CronTrigger(hour=int(hour), minute=int(minute), timezone=pytz.timezone(tz)),
+            args=[settings],
+            id="daily_compliance_check",
+            name="Daily Compliance Check",
+        )
+        scheduler.start()
+        logger.info("Scheduler started: daily check at %s %s", run_time, tz)
+    except Exception as e:
+        logger.error("Failed to start scheduler: %s", e)
+
+    return app
 
 
 if __name__ == "__main__":

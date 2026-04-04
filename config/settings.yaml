@@ -30,17 +30,21 @@ database:
 gocanvas:
   base_url: "https://www.gocanvas.com/apiv2"
 
+  # GoCanvas Workflow Handoff Webhook tags use the format set in GoCanvas admin.
+  # The app matches by checking if the webhook_tag text appears within the tag
+  # sent by GoCanvas (case-insensitive). Example: GoCanvas sends
+  # "F6 – Line Clearance", and we match on "line clearance".
   forms:
     quality_check:
       # Update with your actual GoCanvas form name or ID
       name: "Quality Check Form"
-      # Webhook tag used to identify this form in Dispatch payloads
+      # Text that appears in the GoCanvas form tag (case-insensitive substring match)
       webhook_tag: "quality"
       # Field names in the GoCanvas form that contain images
       image_fields:
         - "photo_1"
         - "photo_2"
-      # Additional fields to extract from submissions
+      # Additional fields to extract from full submission data (fetched via API)
       fields:
         line: "production_line"
         job: "job_number"
@@ -48,7 +52,7 @@ gocanvas:
 
     first_piece_approval:
       name: "First Piece Approval"
-      webhook_tag: "first-piece"
+      webhook_tag: "first piece"
       # Fields used to match against SQL Server production transactions
       match_fields:
         line: "production_line"
@@ -57,7 +61,7 @@ gocanvas:
 
     line_clearance:
       name: "Line Clearance Form"
-      webhook_tag: "line-clearance"
+      webhook_tag: "line clearance"
       match_fields:
         line: "production_line"
 
